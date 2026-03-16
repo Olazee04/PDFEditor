@@ -1,0 +1,159 @@
+@model IEnumerable<PDFEditor.Models.PdfDocument>
+@{
+    ViewData["Title"] = "Dashboard";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<div class="dashboard">
+    <!-- Hero Upload Zone -->
+    <div class="upload-zone" id="uploadZone">
+        <div class="upload-inner">
+            <div class="upload-icon">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="14" fill="#FF4D1C" fill-opacity="0.12"/>
+                    <path d="M16 28l8-8 8 8M24 20v14" stroke="#FF4D1C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 36h24" stroke="#FF4D1C" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+                </svg>
+            </div>
+            <h2>Drop your PDF here</h2>
+            <p>or <label class="file-link" for="fileInput">browse files</label></p>
+            <span class="upload-hint">Supports PDFs up to 50MB · Edits preserve original formatting</span>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf" hidden />
+    </div>
+
+    <!-- Upload Progress -->
+    <div class="upload-progress" id="uploadProgress" style="display:none">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <span id="progressText">Uploading...</span>
+    </div>
+
+    <!-- Documents Grid -->
+    <section class="docs-section">
+        <div class="section-header">
+            <h3>Recent Documents</h3>
+            <span class="doc-count">@Model.Count() files</span>
+        </div>
+
+        @if (!Model.Any())
+        {
+            <div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <p>No documents yet. Upload your first PDF to get started.</p>
+            </div>
+        }
+        else
+        {
+            <div class="docs-grid">
+                @foreach (var doc in Model)
+                {
+                    <div class="doc-card" data-id="@doc.Id">
+                        <div class="doc-thumb">
+                            <svg width="40" height="48" viewBox="0 0 40 48" fill="none">
+                                <rect width="40" height="48" rx="6" fill="#1a1a2e"/>
+                                <rect x="6" y="10" width="20" height="2.5" rx="1.2" fill="#FF4D1C" opacity="0.8"/>
+                                <rect x="6" y="16" width="28" height="2" rx="1" fill="#444" />
+                                <rect x="6" y="21" width="24" height="2" rx="1" fill="#444"/>
+                                <rect x="6" y="26" width="26" height="2" rx="1" fill="#444"/>
+                                <rect x="6" y="31" width="20" height="2" rx="1" fill="#444"/>
+                                <rect x="6" y="36" width="15" height="2" rx="1" fill="#444"/>
+                                <path d="M28 38l4-4 4 4 2-2" stroke="#FF4D1C" stroke-width="1.5" opacity="0.6"/>
+                            </svg>
+                        </div>
+                        <div class="doc-info">
+                            <h4 title="@doc.FileName">@(doc.FileName.Length > 28 ? doc.FileName[..25] + "..." : doc.FileName)</h4>
+                            <div class="doc-meta">
+                                <span>@doc.PageCount pg</span>
+                                <span>·</span>
+                                <span>@(doc.FileSizeBytes / 1024)KB</span>
+                                <span>·</span>
+                                <span>@doc.UploadedAt.ToString("MMM d")</span>
+                            </div>
+                        </div>
+                        <div class="doc-actions">
+                            <a href="/Editor/Edit/@doc.Id" class="btn-edit">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                                Edit
+                            </a>
+                            <a href="/Editor/Download/@doc.Id" class="btn-dl">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                                </svg>
+                            </a>
+                            <button class="btn-del" onclick="deleteDoc(@doc.Id, this)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@section Scripts {
+<script>
+const zone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const progress = document.getElementById('uploadProgress');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) uploadFile(f);
+});
+zone.addEventListener('click', e => {
+    if (!e.target.closest('.file-link')) fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+});
+
+async function uploadFile(file) {
+    if (!file.name.endsWith('.pdf')) { alert('Please upload a PDF file'); return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    progress.style.display = 'block';
+    zone.style.display = 'none';
+
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+            const pct = Math.round(e.loaded / e.total * 100);
+            progressFill.style.width = pct + '%';
+            progressText.textContent = `Uploading... ${pct}%`;
+        }
+    };
+    xhr.onload = () => {
+        const r = JSON.parse(xhr.responseText);
+        if (r.success) {
+            progressText.textContent = 'Opening editor...';
+            progressFill.style.width = '100%';
+            setTimeout(() => window.location.href = `/Editor/Edit/${r.documentId}`, 600);
+        } else {
+            alert(r.message || 'Upload failed');
+            progress.style.display = 'none';
+            zone.style.display = 'block';
+        }
+    };
+    xhr.open('POST', '/Home/Upload');
+    xhr.send(fd);
+}
+
+async function deleteDoc(id, btn) {
+    if (!confirm('Delete this document?')) return;
+    const r = await fetch(`/Home/Delete/${id}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (d.success) btn.closest('.doc-card').remove();
+}
+</script>
+}

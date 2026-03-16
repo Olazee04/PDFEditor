@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+*.db
+*.db-shm
+*.db-wal
+wwwroot/uploads/
+wwwroot/versions/
+appsettings.Development.json
+appsettings.*.json

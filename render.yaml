@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: novapdf-editor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Anthropic__ApiKey
+        sync: false  # Set this manually in Render dashboard
+      - key: ConnectionStrings__DefaultConnection
+        value: Data Source=/app/pdfeditor.db
+    disk:
+      name: pdf-storage
+      mountPath: /app/wwwroot
+      sizeGB: 10
+    healthCheckPath: /
