@@ -69,13 +69,24 @@ namespace PDFEditor.Services
                     TotalPages = totalPages
                 };
 
-                var strategy = new PreciseTextExtractionStrategy();
-                PdfTextExtractor.GetTextFromPage(page, strategy);
-                result.TextBlocks = strategy.GetTextBlocks(pageNumber);
-                result.Fonts = strategy.GetFonts();
-                result.Images = ExtractImageRegionsFromPage(page, pageNumber);
-                result.Lines = ExtractLinesFromPage(page, pageNumber);
-                result.Tables = DetectTablesFromLines(result.Lines, result.TextBlocks, pageNumber, pageSize);
+                try
+                {
+                    var strategy = new PreciseTextExtractionStrategy();
+                    PdfTextExtractor.GetTextFromPage(page, strategy);
+                    result.TextBlocks = strategy.GetTextBlocks(pageNumber);
+                    result.Fonts = strategy.GetFonts();
+                    result.Images = ExtractImageRegionsFromPage(page, pageNumber);
+                    result.Lines = ExtractLinesFromPage(page, pageNumber);
+                    result.Tables = DetectTablesFromLines(result.Lines, result.TextBlocks, pageNumber, pageSize);
+
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Text extraction skipped for page {page}: {msg}",
+                        pageNumber, ex.Message);
+                    result.TextBlocks = new List<PDFEditor.Models.TextBlock>();
+                    result.Fonts = new List<PDFEditor.Models.FontInfo>();
+                }
 
                 return result;
             });

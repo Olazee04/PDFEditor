@@ -16,26 +16,25 @@ namespace PDFEditor.Services
         private readonly IConfiguration _config;
         private readonly ILogger<AiService> _logger;
         private readonly HttpClient _http;
+        private readonly string _apiKey;
 
         public AiService(IConfiguration config, ILogger<AiService> logger, IHttpClientFactory? factory = null)
         {
             _config = config;
             _logger = logger;
+
+            _apiKey = config["Anthropic:ApiKey"]
+                      ?? config.GetSection("Anthropic").GetValue<string>("ApiKey")
+                      ?? Environment.GetEnvironmentVariable("Anthropic__ApiKey")
+                      ?? "";
+
+            _logger.LogInformation("API Key loaded: {present}, length: {len}",
+                !string.IsNullOrEmpty(_apiKey) ? "YES" : "NO - KEY IS MISSING",
+                _apiKey.Length);
+
             _http = new HttpClient();
-
-            // Try both config paths
-            var apiKey = config["Anthropic:ApiKey"]
-                         ?? config.GetSection("Anthropic")["ApiKey"]
-                         ?? "";
-
-            _logger.LogInformation("API Key loaded: {present}", !string.IsNullOrEmpty(apiKey) ? "YES" : "NO - KEY IS MISSING");
-
-            if (!string.IsNullOrEmpty(apiKey))
-            {
-                _http.DefaultRequestHeaders.Add("x-api-key", apiKey);
-                _http.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
-            }
         }
+
         public async Task<AiOperationResult> ProcessCommandAsync(AiCommandRequest request, PdfAnalysisResult analysis)
         {
             var systemPrompt = BuildSystemPrompt(analysis);
@@ -43,7 +42,7 @@ namespace PDFEditor.Services
 
             try
             {
-                var response = await CallClaudeAsync(systemPrompt, userPrompt);
+                var response = await CallGeminiAsync(systemPrompt, userPrompt);
                 return ParseAiResponse(response, request);
             }
             catch (Exception ex)
@@ -59,60 +58,64 @@ namespace PDFEditor.Services
 
         public async Task<string> ChatAsync(string message, List<ChatMessage> history, PdfAnalysisResult? context = null)
         {
-            var systemPrompt = @"You are an expert PDF editing assistant integrated into a professional PDF editor. 
-You help users:
-1. Edit text while preserving exact formatting, fonts, and layout
-2. Detect and extract signatures, logos, stamps, and images
-3. Analyze table structures and perform calculations
-4. Identify font names, sizes, colors, and styles
-5. Add/remove rows in tables while maintaining visual consistency
-6. Suggest edits and explain PDF structure
-
-Always respond in a structured, helpful way. When suggesting operations, be specific about coordinates and parameters.
-When you identify an operation to perform, return it in this JSON format within <operation> tags:
-<operation>
-{
-  ""type"": ""text_edit"" | ""image_copy"" | ""line_add"" | ""redact"" | ""calculate"" | ""font_detect"" | ""image_extract"",
-  ""params"": { ... }
-}
-</operation>";
+            var systemPrompt = "You are an expert PDF editing assistant integrated into a professional PDF editor. You help users: 1. Edit text while preserving exact formatting, fonts, and layout. 2. Detect and extract signatures, logos, stamps, and images. 3. Analyze table structures and perform calculations. 4. Identify font names, sizes, colors, and styles. 5. Add/remove rows in tables while maintaining visual consistency. Always respond in a structured, helpful way.";
 
             if (context != null)
             {
-                systemPrompt += $"\n\nCurrent document context:\n{JsonConvert.SerializeObject(new {
-                    pages = context.PageInfo.TotalPages,
-                    fonts = context.Fonts.Select(f => new { f.Name, f.Size }).Take(5),
-                    tables = context.Tables.Count,
-                    images = context.Images.Count,
-                    textBlocks = context.TextBlocks.Count
-                }, Formatting.Indented)}";
+                systemPrompt += $"\n\nCurrent document: {context.PageInfo.TotalPages} pages. " +
+                    $"Fonts: {string.Join(", ", context.Fonts.Take(3).Select(f => f.Name))}. " +
+                    $"Tables: {context.Tables.Count}. Images: {context.Images.Count}. " +
+                    $"Text blocks: {context.TextBlocks.Count}.";
             }
 
-            var messages = history.Select(h => new { role = h.Role, content = h.Content }).ToList<object>();
-            messages.Add(new { role = "user", content = message });
+            // Build contents array for Gemini.
+            var contents = new List<object>();
+
+            foreach (var h in history.TakeLast(10))
+            {
+                contents.Add(new
+                {
+                    role = h.Role == "assistant" ? "model" : "user",
+                    parts = new[] { new { text = h.Content } }
+                });
+            }
+
+            contents.Add(new
+            {
+                role = "user",
+                parts = new[] { new { text = message } }
+            });
 
             var payload = new
             {
-                model = "claude-sonnet-4-5",
-                max_tokens = 1024,
-                system = systemPrompt,
-                messages
+                system_instruction = new
+                {
+                    parts = new[] { new { text = systemPrompt } }
+                },
+                contents,
+                generationConfig = new
+                {
+                    maxOutputTokens = 1024,
+                    temperature = 0.7
+                }
             };
 
             var json = JsonConvert.SerializeObject(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var resp = await _http.PostAsync("https://api.anthropic.com/v1/messages", content);
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+
+            var resp = await _http.PostAsync(url, content);
 
             if (!resp.IsSuccessStatusCode)
             {
                 var err = await resp.Content.ReadAsStringAsync();
-                _logger.LogError("Claude API error: {err}", err);
-                return "I'm having trouble connecting to the AI service. Please check your API key in settings.";
+                _logger.LogError("Gemini API error: {err}", err);
+                return "I'm having trouble connecting to the AI service. Please check your API key.";
             }
 
             var body = await resp.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<dynamic>(body);
-            return result?.content?[0]?.text?.ToString() ?? "No response";
+            return result?.candidates?[0]?.content?.parts?[0]?.text?.ToString() ?? "No response";
         }
 
         public async Task<List<string>> SuggestActionsAsync(PdfAnalysisResult analysis)
@@ -124,7 +127,8 @@ When you identify an operation to perform, return it in this JSON format within 
                 suggestions.Add($"📊 Detected {analysis.Tables.Count} table(s). I can add rows, calculate totals, or reformat them.");
                 var numericCols = analysis.Tables.FirstOrDefault()?.Rows
                     .SelectMany(r => r.Cells.Where(c => c.IsNumeric)).Any() ?? false;
-                if (numericCols) suggestions.Add("🔢 Found numeric columns — I can auto-calculate totals or subtotals.");
+                if (numericCols)
+                    suggestions.Add("🔢 Found numeric columns — I can auto-calculate totals or subtotals.");
             }
 
             if (analysis.Images.Any(i => i.PossiblySignature))
@@ -152,19 +156,17 @@ When you identify an operation to perform, return it in this JSON format within 
             return $@"You are a PDF editing AI. You have analyzed the current page and found:
 - Fonts: {string.Join(", ", analysis.Fonts.Take(3).Select(f => $"{f.Name} {f.Size}pt"))}
 - {analysis.TextBlocks.Count} text blocks
-- {analysis.Images.Count} images ({analysis.Images.Count(i => i.PossiblySignature)} possible signatures, {analysis.Images.Count(i => i.PossiblyLogo)} possible logos)
+- {analysis.Images.Count} images ({analysis.Images.Count(i => i.PossiblySignature)} possible signatures)
 - {analysis.Tables.Count} table(s)
-- {analysis.Lines.Count} line elements
+- Page dimensions: {analysis.PageInfo.Width:F0} x {analysis.PageInfo.Height:F0} points
 
-Page dimensions: {analysis.PageInfo.Width:F0} x {analysis.PageInfo.Height:F0} points
-
-You must return a JSON operation plan. Always respond with valid JSON in this format:
+Respond with valid JSON:
 {{
-  ""understood"": ""<plain English summary of what the user wants>"",
+  ""understood"": ""plain English summary"",
   ""operation"": ""text_edit|image_copy|line_add|calculate|detect_font|extract_image|redact|none"",
   ""confidence"": 0.0-1.0,
-  ""params"": {{ ... operation-specific parameters ... }},
-  ""explanation"": ""<what will happen and why this preserves the document layout>""
+  ""params"": {{}},
+  ""explanation"": ""what will happen""
 }}";
         }
 
@@ -173,20 +175,13 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
             var sb = new StringBuilder();
             sb.AppendLine($"User command: \"{request.Command}\"");
             sb.AppendLine($"Page: {request.PageNumber}");
-
             if (!string.IsNullOrEmpty(request.SelectedRegionJson))
-            {
                 sb.AppendLine($"Selected region: {request.SelectedRegionJson}");
-            }
-
             if (analysis.Tables.Count > 0)
             {
                 var t = analysis.Tables[0];
-                sb.AppendLine($"\nTable detected at ({t.X:F0},{t.Y:F0}), {t.Rows.Count} rows x {t.ColumnBoundaries.Count - 1} columns");
-                sb.AppendLine("Row data: " + JsonConvert.SerializeObject(
-                    t.Rows.Take(3).Select(r => r.Cells.Select(c => c.Text))));
+                sb.AppendLine($"Table at ({t.X:F0},{t.Y:F0}), {t.Rows.Count} rows");
             }
-
             return sb.ToString();
         }
 
@@ -196,7 +191,6 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
             {
                 var parsed = JsonConvert.DeserializeObject<dynamic>(response);
                 if (parsed == null) throw new Exception("Empty response");
-
                 return new AiOperationResult
                 {
                     Success = true,
@@ -218,26 +212,33 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
             }
         }
 
-        private async Task<string> CallClaudeAsync(string system, string userMessage)
+        private async Task<string> CallGeminiAsync(string system, string userMessage)
         {
             var payload = new
             {
-                model = "claude-sonnet-4-5",
-                max_tokens = 1024,
-                system,
-                messages = new[] { new { role = "user", content = userMessage } }
+                system_instruction = new
+                {
+                    parts = new[] { new { text = system } }
+                },
+                contents = new[]
+                {
+                    new { role = "user", parts = new[] { new { text = userMessage } } }
+                },
+                generationConfig = new { maxOutputTokens = 1024 }
             };
 
             var json = JsonConvert.SerializeObject(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var resp = await _http.PostAsync("https://api.anthropic.com/v1/messages", content);
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+
+            var resp = await _http.PostAsync(url, content);
             var body = await resp.Content.ReadAsStringAsync();
 
             if (!resp.IsSuccessStatusCode)
-                throw new Exception($"Claude API: {body}");
+                throw new Exception($"Gemini API: {body}");
 
             var result = JsonConvert.DeserializeObject<dynamic>(body);
-            return result?.content?[0]?.text?.ToString() ?? "{}";
+            return result?.candidates?[0]?.content?.parts?[0]?.text?.ToString() ?? "{}";
         }
     }
 
@@ -246,8 +247,6 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
         public string Role { get; set; } = "user";
         public string Content { get; set; } = "";
     }
-
-    // ─── Stub services ───────────────────────────────────────────────────────────
 
     public interface IFontDetectionService
     {
@@ -258,7 +257,6 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
     {
         private readonly IPdfService _pdf;
         public FontDetectionService(IPdfService pdf) => _pdf = pdf;
-
         public async Task<List<PDFEditor.Models.FontInfo>> DetectFontsAsync(string filePath)
         {
             var analysis = await _pdf.AnalyzePdfAsync(filePath);
@@ -275,7 +273,6 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
     {
         private readonly IPdfService _pdf;
         public ImageExtractionService(IPdfService pdf) => _pdf = pdf;
-
         public async Task<List<ImageRegion>> ExtractAsync(string filePath, int page) =>
             await _pdf.ExtractImagesAsync(filePath, page);
     }
@@ -289,7 +286,6 @@ You must return a JSON operation plan. Always respond with valid JSON in this fo
     {
         private readonly IPdfService _pdf;
         public TableAnalysisService(IPdfService pdf) => _pdf = pdf;
-
         public async Task<TableStructure?> AnalyzeAsync(string filePath, int page, float x, float y) =>
             await _pdf.DetectTableAsync(filePath, page, x, y);
     }
