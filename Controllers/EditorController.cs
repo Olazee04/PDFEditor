@@ -92,10 +92,26 @@ namespace PDFEditor.Controllers
                 : null;
 
             PdfAnalysisResult? analysis = null;
+            string extractedText = "";
             if (doc != null)
             {
-                try { analysis = await _pdf.AnalyzePdfAsync(doc.StoragePath, request.PageNumber); }
+                try
+                {
+                    analysis = await _pdf.AnalyzePdfAsync(doc.StoragePath, request.PageNumber);
+                    // Extract raw text from all text blocks
+                    if (analysis.TextBlocks.Any())
+                    {
+                        extractedText = string.Join("\n", analysis.TextBlocks.Select(t => t.Text));
+                    }
+                }
                 catch { }
+            }
+
+            // Append extracted text to the message so AI can read the actual content
+            if (!string.IsNullOrEmpty(extractedText))
+            {
+                request.Message = request.Message +
+                    $"\n\n--- ACTUAL DOCUMENT TEXT (Page {request.PageNumber}) ---\n{extractedText}\n--- END OF DOCUMENT TEXT ---";
             }
 
             var history = request.History ?? new List<ChatMessage>();

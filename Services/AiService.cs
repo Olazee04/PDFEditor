@@ -66,8 +66,30 @@ namespace PDFEditor.Services
                     $"Fonts: {string.Join(", ", context.Fonts.Take(3).Select(f => f.Name))}. " +
                     $"Tables: {context.Tables.Count}. Images: {context.Images.Count}. " +
                     $"Text blocks: {context.TextBlocks.Count}.";
-            }
 
+                // Include actual text content so AI can read the document
+                if (context.TextBlocks.Any())
+                {
+                    var pageText = string.Join(" ", context.TextBlocks
+                        .OrderBy(t => t.Y)
+                        .Select(t => t.Text));
+                    systemPrompt += $"\n\nDocument text content:\n{pageText}";
+                }
+
+                // Include table data if detected
+                if (context.Tables.Any())
+                {
+                    foreach (var table in context.Tables)
+                    {
+                        systemPrompt += $"\n\nTable detected with {table.Rows.Count} rows:";
+                        foreach (var row in table.Rows)
+                        {
+                            var cells = string.Join(" | ", row.Cells.Select(c => c.Text));
+                            systemPrompt += $"\n{cells}";
+                        }
+                    }
+                }
+            }
             // Build contents array for Gemini.
             var contents = new List<object>();
 
@@ -102,7 +124,7 @@ namespace PDFEditor.Services
 
             var json = JsonConvert.SerializeObject(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
 
             var resp = await _http.PostAsync(url, content);
 
@@ -229,7 +251,7 @@ Respond with valid JSON:
 
             var json = JsonConvert.SerializeObject(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
 
             var resp = await _http.PostAsync(url, content);
             var body = await resp.Content.ReadAsStringAsync();

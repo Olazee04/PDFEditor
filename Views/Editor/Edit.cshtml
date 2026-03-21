@@ -228,10 +228,13 @@ main { padding: 0; }
 .ai-messages {
     flex: 1; overflow-y: auto; padding: 12px;
     display: flex; flex-direction: column; gap: 10px;
+    max-height: calc(100vh - 220px);
+    scroll-behavior: smooth;
 }
 .ai-msg {
     max-width: 90%; padding: 10px 12px;
     border-radius: 10px; font-size: 12px; line-height: 1.5;
+    word-wrap: break-word; overflow-wrap: break-word;
 }
 .ai-msg.user {
     align-self: flex-end;
