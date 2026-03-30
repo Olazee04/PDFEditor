@@ -10,7 +10,7 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 
-# Install libgdiplus for PDF rendering support
+
 RUN apt-get update && apt-get install -y \
     libgdiplus \
     libc6-dev \
@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=build /app/publish .
 
-# Create writable directories
+
 RUN mkdir -p /app/wwwroot/uploads /app/wwwroot/versions
 
 EXPOSE 8080
