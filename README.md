@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Bootstrap-5.3-7952B3?style=for-the-badge&logo=bootstrap&logoColor=white" />
   <img src="https://img.shields.io/badge/Deployed_on-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white" />
 </p>
-A professional, AI-powered PDF editor built with **C# ASP.NET Core MVC**, **SQLite**, and **Claude AI** — deployable to **Render.com** in minutes.
+A professional, AI-powered PDF editor built with **C# ASP.NET Core MVC**, and **AI**.
 
 ---
 
