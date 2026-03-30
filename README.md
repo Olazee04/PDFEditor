@@ -1,5 +1,15 @@
 # NovaPDF Editor
+<a href="https://pdfeditor-sqir.onrender.com/">
+  <img src="https://img.shields.io/badge/Live_Demo-Visit_Site-success?style=for-the-badge&logo=render" />
+</a>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" />
+  <img src="https://img.shields.io/badge/ASP.NET_Core-MVC-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" />
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" />
+  <img src="https://img.shields.io/badge/Bootstrap-5.3-7952B3?style=for-the-badge&logo=bootstrap&logoColor=white" />
+  <img src="https://img.shields.io/badge/Deployed_on-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white" />
+</p>
 A professional, AI-powered PDF editor built with **C# ASP.NET Core MVC**, **SQLite**, and **Claude AI** — deployable to **Render.com** in minutes.
 
 ---
